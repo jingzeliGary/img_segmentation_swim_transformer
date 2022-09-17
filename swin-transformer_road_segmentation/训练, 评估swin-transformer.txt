@@ -1,0 +1,126 @@
+windows 环境配置：
+windows 11， 
+cuda 11.3,
+python 3.8,
+pytorch 1.10.0,
+mmcv-full 1.4.0,
+
+1.1 Labelme 标注图片
+# 图片与其标注的 json 文件在一个文件夹中
+
+1.1.1 转换COCO格式并组织文件结构
+# 为了尽可能少改动配置文件，我们需要将训练文件按照以下结构组织
+# 0.项目下新建2级文件夹data/coco
+# 1.将标注好的图片和标注json文件分为训练集和测试集，并分别放到 train2017和val2017文件夹下；
+# 2.使用脚本labelme2coco.py生成COCO格式的json标注文件，脚本位置：E:\Labelme
+
+python labelme2coco.py --img_path train2017 --output instances_train2017.json
+python labelme2coco.py --img_path val2017 --output instances_val2017.json
+
+       # 可以使用`coco_validate.ipynb`验证转换后的标注是否正常，顺便检查标签顺序，coco_validate.ipynb位置：E:\Labelme
+
+# 3.新建文件夹annotations，将instances_train2017.json和instances_val2017.json移入
+
+# 4.最终文件结构如下，附件位置：实战项目14：swin-transformer车道分割\5.课程用数据集
+Swin-Transformer-Object-Detection
+    --|data
+        --|coco
+            --|annotations
+                --|instances_train2017.json
+                --|instances_val2017.json
+            --|train2017
+                --|图片
+                --|标注.json
+            --|val2017
+                --|图片
+                --|标注.json
+
+1.2 安装mmcv
+# 参考 https://github.com/open-mmlab/mmcv
+pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/index.html
+pip list
+
+1.3 安装mmdetection
+git clone https://github.com/open-mmlab/mmdetection.git   
+cd mmdetection   
+pip install -r requirements/build.txt   
+pip install -v -e .  # 安装
+# 检查
+pip list
+
+1.4 安装apex
+#安装apex混合精度工具
+git clone https://github.com/NVIDIA/apex
+打开下载好的apex, 进入.\apex\apex\amp 文件夹，选择utils，修改utils,py中的 97行  if cached_x.grad_fn.next_functions[0][0].variable is not x:    保存关闭
+cd apex
+python setup.py install
+
+1.5 安装Swin-Transformer-Object-Detection
+# clone
+git clone https://github.com/SwinTransformer/Swin-Transformer-Object-Detection.git
+# 安装
+cd Swin-Transformer-Object-Detection
+python setup.py develop
+
+# 复制权重文件到新创的weights文件夹
+权重文件参考： https://github.com/SwinTransformer/Swin-Transformer-Object-Detection
+mask_rcnn_swin_tiny_patch4_window7_1x.pth
+
+# 测试图片
+python demo/image_demo.py demo/demo.jpg configs/swin/mask_rcnn_swin_tiny_patch4_window7_mstrain_480-800_adamw_1x_coco.py weights/mask_rcnn_swin_tiny_patch4_window7_1x.pth
+
+1.6 修改配置文件
+# 修改configs\_base_\models\mask_rcnn_swin_fpn.py第54、73行num_classes为自己的类别数（=4）
+
+# 运行 python modify.py 修改对应模型的预训练权重
+python .\modify.py --weights mask_rcnn_swin_tiny_patch4_window7_1x.pth --num_class 4 --output model_new.pth
+
+#修改configs\_base_\default_runtime.py，在最后增加一句加载预训练权重命令，用绝对路径
+load_from = r"E:\PycharmProject\img_segmentation\swin-transformer_road_segmentation\Swin-Transformer-Object-Detection\weights\model_new.pth"
+
+# 修改对应选择的权重的对应权重配置文件
+# 权重配置文件参考：https://github.com/SwinTransformer/Swin-Transformer-Object-Detection
+修改 configs\swin\mask_rcnn_swin_tiny_patch4_window7_mstrain_480-800_adamw_1x_coco.py第69行max_epochs数量
+
+# 修改configs\_base_\datasets\coco_instance.py第31-32行数据加载情况
+samples_per_gpu=1, 
+workers_per_gpu=0,
+
+# 修改mmdet\datasets\coco.py第23行改为自己的标注，label顺序在coco_validate.ipynb中查看
+CLASSES = ('arrow', 'car', 'dashed', 'line')
+
+1.7 训练可视化
+# 安装wandb
+pip install wandb
+# 登录
+wandb login
+
+# #修改configs\_base_\default_runtime.py
+
+log_config = dict(
+    interval=50,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook'), # 开启tensorboard
+        dict(
+            type='WandbLoggerHook',
+            init_kwargs=dict(
+                project='road_segmentation', # 项目名
+                name='windows_modified_run' # 运行名
+            )
+        )
+    ])
+    
+# wandb在浏览器打开即可
+
+1.8 开始训练
+#训练
+python tools/train.py
+ configs/swin/mask_rcnn_swin_tiny_patch4_window7_mstrain_480-800_adamw_1x_coco.py
+
+1.9 测试
+# 测试图片
+# 将测试图片放到demo文件夹下，在训练后生成的work_dirs文件夹下选择合适的权重和其权重配置文件，并将他们放到weights文件夹下
+python demo/image_demo.py demo/road.png 
+ configs/swin/mask_rcnn_swin_tiny_patch4_window7_mstrain_480-800_adamw_1x_coco.py   # 权重配置文件路径
+ work_dirs/mask_rcnn_swin_tiny_patch4_window7_mstrain_480-800_adamw_1x_coco/latest.pth  # 权重路径
